@@ -14,6 +14,9 @@ if (!DEEPGRAM_API_KEY) {
 
 // Nova-3, Egyptian Arabic dialect, interim results on (needed for "fast" mode),
 // numerals=true asks Deepgram to return spoken numbers as digits directly.
+// We stream raw 16kHz mono PCM from the browser (not WebM/Opus chunks —
+// MediaRecorder's timesliced chunks aren't independently decodable, which
+// silently breaks streaming after the first chunk).
 const DEEPGRAM_URL =
   'wss://api.deepgram.com/v1/listen' +
   '?model=nova-3' +
@@ -22,7 +25,9 @@ const DEEPGRAM_URL =
   '&numerals=true' +
   '&endpointing=300' +
   '&punctuate=false' +
-  '&smart_format=false';
+  '&smart_format=false' +
+  '&encoding=linear16' +
+  '&sample_rate=16000';
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -45,7 +50,12 @@ wss.on('connection', (clientWs) => {
 
   dgSocket.on('message', (data) => {
     // forward Deepgram's transcript JSON straight through to the browser
-    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data.toString());
+    const text = data.toString();
+    try{
+      const parsed = JSON.parse(text);
+      console.log('Deepgram message type:', parsed.type, '| transcript:', parsed.channel?.alternatives?.[0]?.transcript);
+    }catch(e){ console.log('Deepgram non-JSON message'); }
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(text);
   });
 
   dgSocket.on('error', (err) => {
