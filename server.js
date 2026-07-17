@@ -1,0 +1,82 @@
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: '/stt' });
+
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+if (!DEEPGRAM_API_KEY) {
+  console.error('Missing DEEPGRAM_API_KEY in .env — the server will start but streaming will fail.');
+}
+
+// Nova-3, Egyptian Arabic dialect, interim results on (needed for "fast" mode),
+// numerals=true asks Deepgram to return spoken numbers as digits directly.
+const DEEPGRAM_URL =
+  'wss://api.deepgram.com/v1/listen' +
+  '?model=nova-3' +
+  '&language=ar-EG' +
+  '&interim_results=true' +
+  '&numerals=true' +
+  '&endpointing=300' +
+  '&punctuate=false' +
+  '&smart_format=false';
+
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+wss.on('connection', (clientWs) => {
+  console.log('Browser connected');
+
+  const dgSocket = new WebSocket(DEEPGRAM_URL, {
+    headers: { Authorization: `Token ${DEEPGRAM_API_KEY}` },
+  });
+
+  let dgReady = false;
+  const pending = [];
+
+  dgSocket.on('open', () => {
+    dgReady = true;
+    console.log('Connected to Deepgram');
+    // flush any audio chunks that arrived before Deepgram finished connecting
+    while (pending.length) dgSocket.send(pending.shift());
+  });
+
+  dgSocket.on('message', (data) => {
+    // forward Deepgram's transcript JSON straight through to the browser
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data.toString());
+  });
+
+  dgSocket.on('error', (err) => {
+    console.error('Deepgram socket error:', err.message);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({ error: 'deepgram_error', message: err.message }));
+    }
+  });
+
+  dgSocket.on('close', (code, reason) => {
+    console.log('Deepgram socket closed', code, reason.toString());
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+  });
+
+  clientWs.on('message', (audioChunk) => {
+    if (dgReady && dgSocket.readyState === WebSocket.OPEN) {
+      dgSocket.send(audioChunk);
+    } else {
+      pending.push(audioChunk);
+    }
+  });
+
+  clientWs.on('close', () => {
+    console.log('Browser disconnected');
+    if (dgSocket.readyState === WebSocket.OPEN || dgSocket.readyState === WebSocket.CONNECTING) {
+      dgSocket.close();
+    }
+  });
+
+  clientWs.on('error', (err) => console.error('Client socket error:', err.message));
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Relay server listening on port ${PORT}`));
