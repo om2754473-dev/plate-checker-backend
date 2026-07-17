@@ -17,9 +17,16 @@ if (!DEEPGRAM_API_KEY) {
 // We stream raw 16kHz mono PCM from the browser (not WebM/Opus chunks —
 // MediaRecorder's timesliced chunks aren't independently decodable, which
 // silently breaks streaming after the first chunk).
-const DEEPGRAM_URL =
-  'wss://api.deepgram.com/v1/listen' +
-  '?model=nova-3' +
+//
+// Keyterm Prompting boosts recognition of the exact vocabulary this app
+// depends on — the formal Arabic letter names used to spell out plates —
+// without any retraining.
+const PLATE_LETTER_KEYTERMS = [
+  'حاء','باء','طاء','قاف','كاف','لام','ميم','نون','هاء','واو','ياء',
+  'الف','دال','راء','سين','صاد','عين'
+];
+const baseParams =
+  'model=nova-3' +
   '&language=ar-EG' +
   '&interim_results=true' +
   '&numerals=true' +
@@ -28,6 +35,10 @@ const DEEPGRAM_URL =
   '&smart_format=false' +
   '&encoding=linear16' +
   '&sample_rate=16000';
+const keytermParams = PLATE_LETTER_KEYTERMS
+  .map(term => `keyterm=${encodeURIComponent(term)}`)
+  .join('&');
+const DEEPGRAM_URL = `wss://api.deepgram.com/v1/listen?${baseParams}&${keytermParams}`;
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
