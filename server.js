@@ -19,11 +19,17 @@ if (!DEEPGRAM_API_KEY) {
 // silently breaks streaming after the first chunk).
 //
 // Keyterm Prompting boosts recognition of the exact vocabulary this app
-// depends on — the formal Arabic letter names used to spell out plates —
-// without any retraining.
+// depends on: both the formal Arabic letter names AND the colloquial
+// Egyptian variants actually observed in production logs (e.g. "حا" for
+// حاء, "طه" for طاء, "به" for باء) — real model fine-tuning is an
+// Enterprise-only feature (~$10k, needs 10-30hrs of labeled audio), so
+// this free self-serve route is the practical lever available to us.
 const PLATE_LETTER_KEYTERMS = [
+  // formal names
   'حاء','باء','طاء','قاف','كاف','لام','ميم','نون','هاء','واو','ياء',
-  'الف','دال','راء','سين','صاد','عين'
+  'الف','دال','راء','سين','صاد','عين',
+  // observed colloquial/shortened Egyptian pronunciations
+  'حا','طه','به','يه','نو','مي','كا','لا'
 ];
 const baseParams =
   'model=nova-3' +
