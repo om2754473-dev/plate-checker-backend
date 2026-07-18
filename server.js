@@ -31,22 +31,62 @@ const PLATE_LETTER_KEYTERMS = [
   // observed colloquial/shortened Egyptian pronunciations
   'حا','طه','به','يه','نو','مي','كا','لا'
 ];
-const baseParams =
-  'model=nova-3' +
-  '&language=ar-EG' +
-  '&interim_results=true' +
-  '&numerals=true' +
-  '&endpointing=300' +
-  '&punctuate=false' +
-  '&smart_format=false' +
-  '&encoding=linear16' +
-  '&sample_rate=16000';
 const keytermParams = PLATE_LETTER_KEYTERMS
   .map(term => `keyterm=${encodeURIComponent(term)}`)
   .join('&');
+
+// Shared recognition settings for both modes.
+const sharedParams =
+  'model=nova-3' +
+  '&language=ar-EG' +
+  '&numerals=true' +
+  '&punctuate=false' +
+  '&smart_format=false';
+
+// Streaming (WebSocket): we send raw 16kHz mono PCM (not WebM/Opus chunks —
+// MediaRecorder's timesliced chunks aren't independently decodable, which
+// silently breaks streaming after the first chunk), so encoding must be
+// declared explicitly.
+const baseParams = sharedParams + '&interim_results=true&endpointing=300&encoding=linear16&sample_rate=16000';
 const DEEPGRAM_URL = `wss://api.deepgram.com/v1/listen?${baseParams}&${keytermParams}`;
 
+// Batch (HTTP upload): the browser uploads a complete, valid WebM/Opus
+// file, so Deepgram auto-detects the container — no encoding params needed.
+const batchParams = sharedParams;
+
+
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// Batch transcription: the browser records one complete plate utterance
+// (silence-detected), uploads it whole, and we send it to Deepgram's
+// pre-recorded endpoint — which sees the full audio at once instead of
+// guessing word-by-word, and is noticeably more accurate for this kind of
+// short, spelled-out speech than live streaming is.
+app.post('/transcribe', express.raw({ type: '*/*', limit: '10mb' }), async (req, res) => {
+  try {
+    const contentType = req.headers['content-type'] || 'audio/webm';
+    const url = `https://api.deepgram.com/v1/listen?${batchParams}&${keytermParams}`;
+    const dgRes = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${DEEPGRAM_API_KEY}`,
+        'Content-Type': contentType,
+      },
+      body: req.body,
+    });
+    const data = await dgRes.json();
+    if (!dgRes.ok) {
+      console.error('Deepgram batch error:', JSON.stringify(data));
+      return res.status(502).json({ error: 'deepgram_error', message: data.err_msg || 'transcription failed' });
+    }
+    const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+    console.log('Batch transcript:', transcript);
+    res.json({ transcript });
+  } catch (err) {
+    console.error('Transcribe endpoint error:', err.message);
+    res.status(500).json({ error: 'server_error', message: err.message });
+  }
+});
 
 wss.on('connection', (clientWs) => {
   console.log('Browser connected');
